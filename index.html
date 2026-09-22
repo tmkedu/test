@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>無障礙書籤管理員</title>
+    <!-- 引入 Tailwind CSS 以便快速構建響應式與美觀的介面 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 
+         * 無障礙樣式設定
+         * 1. 確保所有可聚焦元素在獲得焦點時有明顯的高對比外框 (符合 WCAG 2.4.7 焦點可見)
+         */
+        *:focus-visible {
+            outline: 4px solid #ff9800; /* 高對比橘色 */
+            outline-offset: 2px;
+            border-radius: 2px;
+        }
+
+        /* 
+         * 2. 跳過導覽列連結：平常隱藏，僅在鍵盤聚焦時顯示 (符合 WCAG 2.4.1 區塊可跳過)
+         */
+        .skip-link {
+            position: absolute;
+            top: -40px;
+            left: 0;
+            background: #000;
+            color: white;
+            padding: 8px;
+            z-index: 100;
+            transition: top 0.2s;
+        }
+        .skip-link:focus {
+            top: 0;
+        }
+
+        /* 定義動態主題變數，由 JS 動態更新 */
+        :root {
+            --theme-bg: #0d47a1; /* 預設藍色 */
+            --theme-text: #ffffff;
+        }
+
+        .theme-bg { background-color: var(--theme-bg); }
+        .theme-text { color: var(--theme-text); }
+        .theme-border { border-color: var(--theme-bg); }
+        .theme-text-color { color: var(--theme-bg); }
+
+        /* 原生 Dialog 樣式調整，確保覆蓋層無障礙 */
+        dialog::backdrop {
+            background: rgba(0, 0, 0, 0.6);
+        }
+        
+        /* 螢幕閱讀器專用隱藏類別 */
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border-width: 0;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 font-sans antialiased flex flex-col min-h-screen">
+    <!-- 跳過導覽列連結，供鍵盤使用者快速跳至主要內容 -->
+    <a href="#main-content" class="skip-link text-lg font-bold">跳過導覽列直接進入主要內容</a>
+
+    <!-- 頁首：背景顏色將根據星期幾自動改變 -->
+    <header role="banner" class="theme-bg theme-text py-6 px-4 shadow-md transition-colors duration-300">
+        <div class="max-w-4xl mx-auto flex items-center justify-between">
+            <h1 class="text-3xl font-extrabold tracking-tight">我的書籤管理員</h1>
+            <p id="day-indicator" class="text-sm font-medium bg-white/20 px-3 py-1 rounded-full" aria-live="polite">
+                正在載入星期資訊...
+            </p>
+        </div>
+    </header>
+
+    <!-- 主要內容區 -->
+    <main id="main-content" role="main" class="flex-grow max-w-4xl mx-auto w-full p-4 sm:p-6 lg:p-8 space-y-8">
+        
+        <!-- 螢幕閱讀器即時通知區域 (aria-live="polite") -->
+        <div id="live-region" class="sr-only" aria-live="polite"></div>
+
+        <section class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <h2 id="form-title" class="text-2xl font-bold mb-4 theme-text-color">新增書籤</h2>
+            
+            <!-- 表單區塊，確保所有 input 都有對應的 label -->
+            <form id="bookmark-form" class="space-y-4" aria-labelledby="form-title">
+                <input type="hidden" id="bookmark-id">
+                
+                <div>
+                    <label for="bookmark-title" class="block text-sm font-semibold text-gray-700 mb-1">
+                        書籤標題 <span aria-hidden="true" class="text-red-600">*</span>
+                        <span class="sr-only">必填</span>
+                    </label>
+                    <input type="text" id="bookmark-title" name="bookmark-title" required 
+                           class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-offset-2 theme-border transition-shadow"
+                           placeholder="例如：Google 首頁">
+                </div>
+                
+                <div>
+                    <label for="bookmark-url" class="block text-sm font-semibold text-gray-700 mb-1">
+                        網址 (URL) <span aria-hidden="true" class="text-red-600">*</span>
+                        <span class="sr-only">必填</span>
+                    </label>
+                    <input type="url" id="bookmark-url" name="bookmark-url" required 
+                           class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-offset-2 theme-border transition-shadow"
+                           placeholder="例如：https://www.google.com">
+                </div>
+                
+                <div class="flex gap-4 pt-2">
+                    <button type="submit" id="submit-btn" class="flex-1 theme-bg theme-text font-bold py-2 px-4 rounded-lg hover:opacity-90 transition-opacity focus:ring-2 focus:ring-offset-2 focus:ring-gray-400">
+                        儲存書籤
+                    </button>
+                    <button type="button" id="cancel-btn" class="hidden flex-1 bg-gray-200 text-gray-800 font-bold py-2 px-4 rounded-lg hover:bg-gray-300 transition-colors focus:ring-2 focus:ring-offset-2 focus:ring-gray-400">
+                        取消修改
+                    </button>
+                </div>
+            </form>
+        </section>
+
+        <!-- 工具列：匯入與匯出功能 -->
+        <section class="flex flex-wrap items-center justify-between gap-4 bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+            <h2 class="text-lg font-bold text-gray-800">資料管理</h2>
+            <div class="flex gap-3">
+                <button type="button" id="export-btn" class="bg-gray-100 text-gray-700 hover:bg-gray-200 font-semibold py-2 px-4 rounded-lg transition-colors border border-gray-300 focus:ring-2 focus:ring-offset-2 focus:ring-gray-400">
+                    匯出 JSON
+                </button>
+                
+                <label for="import-file" class="bg-gray-100 text-gray-700 hover:bg-gray-200 font-semibold py-2 px-4 rounded-lg transition-colors border border-gray-300 cursor-pointer focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-gray-400">
+                    匯入 JSON
+                    <input type="file" id="import-file" accept=".json" class="sr-only">
+                </label>
+            </div>
+        </section>
+
+        <!-- 書籤列表顯示區 -->
+        <section aria-labelledby="list-title">
+            <h2 id="list-title" class="text-2xl font-bold mb-4 theme-text-color">我的書籤列表</h2>
+            <!-- 如果沒有書籤時的空狀態顯示 -->
+            <div id="empty-state" class="hidden bg-white rounded-xl shadow-sm border border-gray-200 p-8 text-center text-gray-500">
+                目前沒有任何書籤，請從上方新增。
+            </div>
+            <ul id="bookmark-list" class="space-y-3">
+                <!-- JavaScript 將動態生成 <li> 內容 -->
+            </ul>
+        </section>
+    </main>
+
+    <!-- 刪除確認對話框 (無障礙 HTML5 Dialog) -->
+    <dialog id="delete-dialog" class="p-0 rounded-xl shadow-2xl border-0 backdrop:bg-black/60 max-w-sm w-full mx-auto" aria-labelledby="dialog-title" aria-describedby="dialog-desc">
+        <div class="p-6 bg-white">
+            <h2 id="dialog-title" class="text-xl font-bold text-gray-900 mb-2">確認刪除？</h2>
+            <p id="dialog-desc" class="text-gray-600 mb-6">您確定要刪除這個書籤嗎？此動作無法復原。</p>
+            <div class="flex gap-3 justify-end">
+                <button type="button" id="cancel-delete-btn" class="px-4 py-2 bg-gray-200 text-gray-800 font-semibold rounded-lg hover:bg-gray-300 focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors">
+                    取消
+                </button>
+                <button type="button" id="confirm-delete-btn" class="px-4 py-2 bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700 focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors">
+                    確認刪除
+                </button>
+            </div>
+        </div>
+    </dialog>
+
+    <!-- 訊息提示對話框 (取代 alert) -->
+    <dialog id="message-dialog" class="p-0 rounded-xl shadow-2xl border-0 backdrop:bg-black/60 max-w-sm w-full mx-auto" aria-labelledby="msg-dialog-title">
+        <div class="p-6 bg-white text-center">
+            <h2 id="msg-dialog-title" class="text-xl font-bold text-gray-900 mb-4">系統訊息</h2>
+            <p id="msg-dialog-content" class="text-gray-700 mb-6">訊息內容</p>
+            <button type="button" id="close-msg-btn" class="px-6 py-2 theme-bg theme-text font-bold rounded-lg hover:opacity-90 focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors">
+                了解
+            </button>
+        </div>
+    </dialog>
+
+    <script>
+        // 核心狀態管理
+        let bookmarks = [];
+        let bookmarkToDelete = null;
+
+        // 佈景主題設定 (針對一週七天，色彩皆經過對比度 4.5:1 確認)
+        const weeklyThemes = [
+            { day: '星期日', bg: '#4a148c', text: '#ffffff' }, // 深紫
+            { day: '星期一', bg: '#0d47a1', text: '#ffffff' }, // 深藍
+            { day: '星期二', bg: '#004d40', text: '#ffffff' }, // 墨綠
+            { day: '星期三', bg: '#1b5e20', text: '#ffffff' }, // 森林綠
+            { day: '星期四', bg: '#3e2723', text: '#ffffff' }, // 深褐
+            { day: '星期五', bg: '#263238', text: '#ffffff' }, // 藍灰
+            { day: '星期六', bg: '#b71c1c', text: '#ffffff' }  // 深紅
+        ];
+
+        // 取得 DOM 元素
+        const form = document.getElementById('bookmark-form');
+        const idInput = document.getElementById('bookmark-id');
+        const titleInput = document.getElementById('bookmark-title');
+        const urlInput = document.getElementById('bookmark-url');
+        const formTitle = document.getElementById('form-title');
+        const submitBtn = document.getElementById('submit-btn');
+        const cancelBtn = document.getElementById('cancel-btn');
+        const listContainer = document.getElementById('bookmark-list');
+        const emptyState = document.getElementById('empty-state');
+        const liveRegion = document.getElementById('live-region');
+        
+        const deleteDialog = document.getElementById('delete-dialog');
+        const msgDialog = document.getElementById('message-dialog');
+
+        // 初始化應用程式
+        function initApp() {
+            setThemeByDay();
+            loadBookmarks();
+            renderBookmarks();
+        }
+
+        // 根據星期設定主題色彩
+        function setThemeByDay() {
+            const today = new Date().getDay(); // 0 是週日, 1-6 是週一到六
+            const theme = weeklyThemes[today];
+            
+            document.documentElement.style.setProperty('--theme-bg', theme.bg);
+            document.documentElement.style.setProperty('--theme-text', theme.text);
+            
+            document.getElementById('day-indicator').textContent = `今天是 ${theme.day}`;
+        }
+
+        // 螢幕閱讀器即時通報 (符合 WCAG 4.1.2 狀態提示)
+        function announceToScreenReader(message) {
+            liveRegion.textContent = '';
+            setTimeout(() => {
+                liveRegion.textContent = message;
+            }, 100);
+        }
+
+        // 顯示自訂訊息框 (取代 alert)
+        function showMessage(msg) {
+            document.getElementById('msg-dialog-content').textContent = msg;
+            msgDialog.showModal();
+            announceToScreenReader(msg);
+        }
+
+        // 從 LocalStorage 載入資料
+        function loadBookmarks() {
+            const saved = localStorage.getItem('accessibility_bookmarks');
+            if (saved) {
+                try {
+                    bookmarks = JSON.parse(saved);
+                } catch (e) {
+                    console.error('解析書籤資料失敗', e);
+                    bookmarks = [];
+                }
+            }
+        }
+
+        // 儲存資料至 LocalStorage
+        function saveBookmarks() {
+            localStorage.setItem('accessibility_bookmarks', JSON.stringify(bookmarks));
+            renderBookmarks();
+        }
+
+        // 渲染書籤列表
+        function renderBookmarks() {
+            listContainer.innerHTML = '';
+            
+            if (bookmarks.length === 0) {
+                emptyState.classList.remove('hidden');
+                return;
+            }
+            
+            emptyState.classList.add('hidden');
+
+            bookmarks.forEach(bookmark => {
+                const li = document.createElement('li');
+                li.className = 'bg-white rounded-lg shadow-sm border border-gray-200 p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 hover:shadow-md transition-shadow';
+                
+                // 書籤連結資訊區
+                const infoDiv = document.createElement('div');
+                infoDiv.className = 'flex-grow min-w-0 break-words';
+                
+                const link = document.createElement('a');
+                link.href = bookmark.url;
+                link.textContent = bookmark.title;
+                link.className = 'text-lg font-bold text-blue-700 hover:text-blue-900 hover:underline focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 outline-none rounded inline-block';
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                // 提供明確的無障礙名稱
+                link.setAttribute('aria-label', `開啟書籤：${bookmark.title} (於新分頁開啟)`);
+                
+                const urlText = document.createElement('p');
+                urlText.className = 'text-sm text-gray-500 mt-1 truncate';
+                urlText.textContent = bookmark.url;
+                urlText.setAttribute('aria-hidden', 'true'); // 避免螢幕閱讀器重複報讀網址
+
+                infoDiv.appendChild(link);
+                infoDiv.appendChild(urlText);
+                
+                // 操作按鈕區
+                const actionsDiv = document.createElement('div');
+                actionsDiv.className = 'flex gap-2 w-full sm:w-auto shrink-0';
+
+                // 修改按鈕
+                const editBtn = document.createElement('button');
+                editBtn.textContent = '修改';
+                editBtn.className = 'flex-1 sm:flex-none px-3 py-1.5 bg-indigo-50 text-indigo-700 font-semibold rounded border border-indigo-200 hover:bg-indigo-100 focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors';
+                editBtn.setAttribute('aria-label', `修改書籤：${bookmark.title}`);
+                editBtn.onclick = () => startEdit(bookmark);
+
+                // 刪除按鈕
+                const delBtn = document.createElement('button');
+                delBtn.textContent = '刪除';
+                delBtn.className = 'flex-1 sm:flex-none px-3 py-1.5 bg-red-50 text-red-700 font-semibold rounded border border-red-200 hover:bg-red-100 focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors';
+                delBtn.setAttribute('aria-label', `刪除書籤：${bookmark.title}`);
+                delBtn.onclick = () => promptDelete(bookmark.id);
+
+                actionsDiv.appendChild(editBtn);
+                actionsDiv.appendChild(delBtn);
+
+                li.appendChild(infoDiv);
+                li.appendChild(actionsDiv);
+                listContainer.appendChild(li);
+            });
+        }
+
+        // 處理表單提交 (新增或修改)
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const id = idInput.value;
+            const title = titleInput.value.trim();
+            const url = urlInput.value.trim();
+
+            if (!title || !url) return;
+
+            if (id) {
+                // 修改模式
+                const index = bookmarks.findIndex(b => b.id === id);
+                if (index !== -1) {
+                    bookmarks[index] = { id, title, url };
+                    announceToScreenReader('書籤已更新完成');
+                }
+            } else {
+                // 新增模式
+                const newBookmark = {
+                    id: Date.now().toString(),
+                    title,
+                    url
+                };
+                bookmarks.push(newBookmark);
+                announceToScreenReader('書籤已成功新增');
+            }
+
+            saveBookmarks();
+            resetForm();
+        });
+
+        // 進入修改模式
+        function startEdit(bookmark) {
+            idInput.value = bookmark.id;
+            titleInput.value = bookmark.title;
+            urlInput.value = bookmark.url;
+            
+            formTitle.textContent = '修改書籤';
+            submitBtn.textContent = '更新書籤';
+            cancelBtn.classList.remove('hidden');
+            
+            titleInput.focus(); // 將焦點移動至輸入框以利操作
+            announceToScreenReader(`正在修改書籤：${bookmark.title}`);
+        }
+
+        // 重設表單至新增模式
+        function resetForm() {
+            idInput.value = '';
+            form.reset();
+            
+            formTitle.textContent = '新增書籤';
+            submitBtn.textContent = '儲存書籤';
+            cancelBtn.classList.add('hidden');
+        }
+
+        cancelBtn.addEventListener('click', () => {
+            resetForm();
+            announceToScreenReader('已取消修改');
+        });
+
+        // 觸發刪除確認對話框
+        function promptDelete(id) {
+            bookmarkToDelete = id;
+            deleteDialog.showModal();
+        }
+
+        // 取消刪除
+        document.getElementById('cancel-delete-btn').addEventListener('click', () => {
+            deleteDialog.close();
+            bookmarkToDelete = null;
+        });
+
+        // 確認刪除
+        document.getElementById('confirm-delete-btn').addEventListener('click', () => {
+            if (bookmarkToDelete) {
+                bookmarks = bookmarks.filter(b => b.id !== bookmarkToDelete);
+                saveBookmarks();
+                announceToScreenReader('書籤已成功刪除');
+                bookmarkToDelete = null;
+            }
+            deleteDialog.close();
+        });
+
+        // 關閉系統訊息對話框
+        document.getElementById('close-msg-btn').addEventListener('click', () => {
+            msgDialog.close();
+        });
+
+        // 匯出功能
+        document.getElementById('export-btn').addEventListener('click', () => {
+            if (bookmarks.length === 0) {
+                showMessage('目前沒有可匯出的書籤。');
+                return;
+            }
+            const dataStr = JSON.stringify(bookmarks, null, 2);
+            const blob = new Blob([dataStr], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'my_bookmarks.json';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            announceToScreenReader('書籤已匯出完成。');
+        });
+
+        // 匯入功能
+        document.getElementById('import-file').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                try {
+                    const importedData = JSON.parse(event.target.result);
+                    if (Array.isArray(importedData)) {
+                        // 簡單驗證資料格式
+                        const validData = importedData.filter(item => item.id && item.title && item.url);
+                        bookmarks = validData;
+                        saveBookmarks();
+                        showMessage(`成功匯入 ${validData.length} 筆書籤！`);
+                    } else {
+                        showMessage('匯入失敗：檔案格式不正確。');
+                    }
+                } catch (error) {
+                    showMessage('匯入失敗：檔案無法解析為 JSON。');
+                }
+                // 重設 input file，允許重複選擇同一個檔案
+                e.target.value = '';
+            };
+            reader.readAsText(file);
+        });
+
+        // 確保 Dialog 在點擊背景時可以關閉 (增強可用性)
+        deleteDialog.addEventListener('click', (e) => {
+            const dialogDimensions = deleteDialog.getBoundingClientRect();
+            if (
+                e.clientX < dialogDimensions.left ||
+                e.clientX > dialogDimensions.right ||
+                e.clientY < dialogDimensions.top ||
+                e.clientY > dialogDimensions.bottom
+            ) {
+                deleteDialog.close();
+            }
+        });
+
+        // 啟動應用
+        window.addEventListener('DOMContentLoaded', initApp);
+
+    </script>
+</body>
+</html>
